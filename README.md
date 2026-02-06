@@ -34,6 +34,8 @@
 
 > **Disclaimer:** 100% vibe-coded with claude-code.
 
+> **Your Feedback Is Welcomed!** Please leave an issue with your feedback :)
+
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
