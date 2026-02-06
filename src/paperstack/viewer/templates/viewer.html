@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paperstack Viewer - {{ paper_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/viewer.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+    <div class="viewer-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>Paperstack</h2>
+                <button class="btn-icon" id="toggleSidebar" title="Toggle sidebar">☰</button>
+            </div>
+
+            <div class="paper-info" id="paperInfo">
+                <h3 id="paperTitle">{{ paper_title }}</h3>
+                <p id="paperAuthors" class="authors"></p>
+                <div id="paperTags" class="tags"></div>
+            </div>
+
+            <div class="annotations-panel">
+                <h4>Annotations</h4>
+                <div class="annotation-tools">
+                    <button class="btn-tool active" data-tool="highlight" title="Highlight">🖍️</button>
+                    <button class="btn-tool" data-tool="comment" title="Comment">💬</button>
+                    <button class="btn-tool" data-tool="note" title="Note">📝</button>
+                </div>
+                <div class="color-picker">
+                    <button class="color-btn active" data-color="#ffeb3b" style="background:#ffeb3b"></button>
+                    <button class="color-btn" data-color="#4caf50" style="background:#4caf50"></button>
+                    <button class="color-btn" data-color="#2196f3" style="background:#2196f3"></button>
+                    <button class="color-btn" data-color="#f44336" style="background:#f44336"></button>
+                    <button class="color-btn" data-color="#9c27b0" style="background:#9c27b0"></button>
+                </div>
+                <ul id="annotationsList" class="annotations-list"></ul>
+            </div>
+        </aside>
+
+        <!-- Main viewer -->
+        <main class="viewer-main">
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <button id="prevPage" class="btn-icon" title="Previous page">◀</button>
+                    <span id="pageInfo">Page <span id="currentPage">1</span> of <span id="totalPages">1</span></span>
+                    <button id="nextPage" class="btn-icon" title="Next page">▶</button>
+                </div>
+                <div class="toolbar-center">
+                    <input type="number" id="pageInput" min="1" value="1" title="Go to page">
+                </div>
+                <div class="toolbar-right">
+                    <button id="zoomOut" class="btn-icon" title="Zoom out">−</button>
+                    <span id="zoomLevel">100%</span>
+                    <button id="zoomIn" class="btn-icon" title="Zoom in">+</button>
+                    <button id="fitWidth" class="btn-icon" title="Fit width">↔</button>
+                </div>
+            </div>
+
+            <div class="pdf-container" id="pdfContainer">
+                <div id="loadingIndicator" class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading PDF...</p>
+                </div>
+                <canvas id="pdfCanvas"></canvas>
+                <div id="annotationLayer" class="annotation-layer"></div>
+                <div id="textLayer" class="text-layer"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Comment modal -->
+    <div id="commentModal" class="modal">
+        <div class="modal-content">
+            <h4>Add Comment</h4>
+            <textarea id="commentText" placeholder="Enter your comment..."></textarea>
+            <div class="modal-buttons">
+                <button id="saveComment" class="btn-primary">Save</button>
+                <button id="cancelComment" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.PAPER_ID = {{ paper_id|tojson }};
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
+</body>
+</html>
