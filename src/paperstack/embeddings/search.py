@@ -91,56 +91,119 @@ class SemanticSearch:
         min_score: float = 0.3,
         done_only: bool = True,
     ) -> list[SearchResult]:
-        """Search for papers matching the query."""
+        """Search for papers matching the query using embeddings and keywords."""
         # Encode query
         query_embedding = self.encoder.encode(query)
+        query_lower = query.lower()
+        query_terms = [term.strip() for term in query_lower.split() if len(term.strip()) > 2]
 
         # Get all embeddings
         all_embeddings = self.repo.get_embeddings()
 
-        if not all_embeddings:
-            return []
-
         # Filter by done papers if requested
         if done_only:
             done_papers = {p.id for p in self.repo.list_done()}
-            all_embeddings = [e for e in all_embeddings if e.paper_id in done_papers]
+            if all_embeddings:
+                all_embeddings = [e for e in all_embeddings if e.paper_id in done_papers]
 
-        if not all_embeddings:
-            return []
-
-        # Convert to numpy arrays
-        paper_ids = [e.paper_id for e in all_embeddings]
-        content_types = [e.content_type for e in all_embeddings]
-        text_contents = [e.text_content for e in all_embeddings]
-        embeddings = np.array([self.encoder.from_bytes(e.embedding) for e in all_embeddings])
-
-        # Compute similarities
-        similarities = self.encoder.cosine_similarity_batch(query_embedding, embeddings)
-
-        # Get top matches
         matches: dict[int, SearchMatch] = {}
-        for idx in np.argsort(similarities)[::-1]:
-            score = float(similarities[idx])
-            if score < min_score:
-                break
 
-            paper_id = paper_ids[idx]
-            # Keep best match per paper
-            if paper_id not in matches or score > matches[paper_id].score:
-                matches[paper_id] = SearchMatch(
-                    paper_id=paper_id,
-                    score=score,
-                    content_type=content_types[idx],
-                    matched_text=text_contents[idx][:300],
-                )
+        # Embedding-based search
+        if all_embeddings:
+            # Convert to numpy arrays
+            paper_ids = [e.paper_id for e in all_embeddings]
+            content_types = [e.content_type for e in all_embeddings]
+            text_contents = [e.text_content for e in all_embeddings]
+            embeddings = np.array([self.encoder.from_bytes(e.embedding) for e in all_embeddings])
 
-            if len(matches) >= top_k:
-                break
+            # Compute similarities
+            similarities = self.encoder.cosine_similarity_batch(query_embedding, embeddings)
+
+            # Get top matches from embeddings
+            for idx in np.argsort(similarities)[::-1]:
+                score = float(similarities[idx])
+                if score < min_score:
+                    break
+
+                paper_id = paper_ids[idx]
+                # Keep best match per paper
+                if paper_id not in matches or score > matches[paper_id].score:
+                    matches[paper_id] = SearchMatch(
+                        paper_id=paper_id,
+                        score=score,
+                        content_type=content_types[idx],
+                        matched_text=text_contents[idx][:300],
+                    )
+
+        # Keyword-based search (cross-reference with title, abstract, and user keywords)
+        papers_to_search = self.repo.list_done() if done_only else self.repo.list_papers()
+
+        for paper in papers_to_search:
+            keyword_score = 0.0
+            matched_text = ""
+
+            # Check title
+            if paper.title and query_lower in paper.title.lower():
+                keyword_score = max(keyword_score, 0.8)
+                matched_text = paper.title
+            elif paper.title and any(term in paper.title.lower() for term in query_terms):
+                keyword_score = max(keyword_score, 0.5)
+                matched_text = paper.title
+
+            # Check abstract
+            if paper.abstract:
+                if query_lower in paper.abstract.lower():
+                    keyword_score = max(keyword_score, 0.7)
+                    if not matched_text:
+                        matched_text = paper.abstract[:300]
+                elif any(term in paper.abstract.lower() for term in query_terms):
+                    keyword_score = max(keyword_score, 0.4)
+                    if not matched_text:
+                        matched_text = paper.abstract[:300]
+
+            # Check user keywords (stored in done_entry.user_concepts)
+            done_entry = self.repo.get_done_entry(paper.id)
+            if done_entry and done_entry.user_concepts:
+                try:
+                    keywords = json.loads(done_entry.user_concepts)
+                    keywords_lower = [k.lower() for k in keywords]
+                    keywords_text = ", ".join(keywords)
+
+                    # Exact match with query
+                    if query_lower in keywords_lower:
+                        keyword_score = max(keyword_score, 0.95)
+                        matched_text = f"Keywords: {keywords_text}"
+                    # Partial match with query terms
+                    elif any(term in kw for term in query_terms for kw in keywords_lower):
+                        keyword_score = max(keyword_score, 0.7)
+                        if not matched_text:
+                            matched_text = f"Keywords: {keywords_text}"
+                    # Query contains a keyword
+                    elif any(kw in query_lower for kw in keywords_lower):
+                        keyword_score = max(keyword_score, 0.75)
+                        if not matched_text:
+                            matched_text = f"Keywords: {keywords_text}"
+                except json.JSONDecodeError:
+                    pass
+
+            # Add or update match if keyword score is significant
+            if keyword_score >= min_score:
+                if paper.id not in matches:
+                    matches[paper.id] = SearchMatch(
+                        paper_id=paper.id,
+                        score=keyword_score,
+                        content_type="keyword",
+                        matched_text=matched_text,
+                    )
+                else:
+                    # Combine scores: take max and add bonus for multiple matches
+                    existing_score = matches[paper.id].score
+                    combined_score = max(existing_score, keyword_score) + min(existing_score, keyword_score) * 0.2
+                    matches[paper.id].score = min(combined_score, 1.0)  # Cap at 1.0
 
         # Build results
         results = []
-        for match in sorted(matches.values(), key=lambda m: m.score, reverse=True):
+        for match in sorted(matches.values(), key=lambda m: m.score, reverse=True)[:top_k]:
             paper = self.repo.get_paper(match.paper_id)
             if paper:
                 done_entry = self.repo.get_done_entry(match.paper_id)

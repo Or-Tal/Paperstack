@@ -177,8 +177,13 @@ def create_app() -> Flask:
     return app
 
 
-def run_viewer(paper_id: int | None = None, host: str | None = None, port: int | None = None):
+def run_viewer(paper_id: int | None = None, host: str | None = None, port: int | None = None, open_browser: bool = True):
     """Run the viewer server."""
+    import socket
+    import threading
+    import time
+    import webbrowser
+
     settings = get_settings()
     host = host or settings.viewer_host
     port = port or settings.viewer_port
@@ -187,9 +192,33 @@ def run_viewer(paper_id: int | None = None, host: str | None = None, port: int |
     if paper_id:
         app.config["CURRENT_PAPER_ID"] = paper_id
 
-    print(f"Starting viewer at http://{host}:{port}")
+    url = f"http://{host}:{port}"
+    if paper_id:
+        url += f"/?paper_id={paper_id}"
+
+    def wait_for_server_and_open_browser():
+        """Wait for server to be ready, then open browser."""
+        max_attempts = 50  # 5 seconds max
+        for _ in range(max_attempts):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.1)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                if result == 0:
+                    webbrowser.open(url)
+                    return
+            except Exception:
+                pass
+            time.sleep(0.1)
+
+    print(f"Starting viewer at {url}")
     if paper_id:
         print(f"Opening paper {paper_id}")
-        print(f"View at: http://{host}:{port}/?paper_id={paper_id}")
+
+    if open_browser:
+        # Start browser opener in background thread
+        browser_thread = threading.Thread(target=wait_for_server_and_open_browser, daemon=True)
+        browser_thread.start()
 
     app.run(host=host, port=port, debug=False)

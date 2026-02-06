@@ -70,7 +70,7 @@ class PaperBrowser:
         status_str = f" ({paper.status})" if self.show_status else ""
 
         title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-        return prefix, f"{paper.id:3d}. {title}{tags_str}{status_str}"
+        return prefix, f"{index + 1:3d}. {title}{tags_str}{status_str}"
 
     def _get_formatted_text(self) -> List[Tuple[str, str]]:
         """Get formatted text for display."""
@@ -467,9 +467,8 @@ def view_paper(paper: Paper, console: Console) -> None:
         # Use built-in Flask + PDF.js viewer
         from paperstack.viewer import run_viewer
 
-        url = f"http://{settings.viewer_host}:{settings.viewer_port}/?paper_id={paper.id}"
         console.print(f"[green]Opening viewer for:[/green] {paper.title}")
-        _open_in_chrome(url)
+        # run_viewer handles opening browser after server starts
         run_viewer(paper_id=paper.id)
 
 
@@ -747,7 +746,7 @@ def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) ->
 
     if not batch_mode:
         console.print(f"\n[bold]Mark as Done:[/bold] {paper.title}")
-        concepts_input = prompt("Enter concepts learned (comma-separated): ")
+        concepts_input = prompt("Please list keywords for search purposes separated by comma: ")
 
         if not concepts_input.strip():
             console.print("[yellow]No concepts provided. Cancelled.[/yellow]")
@@ -784,6 +783,7 @@ def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) ->
 
     # Index for search
     from paperstack.embeddings import SemanticSearch
+    console.print("[dim]Extracting embeddings for search index...[/dim]")
     search = SemanticSearch(repo=repo)
     search.index_paper(paper.id)
 

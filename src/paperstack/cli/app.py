@@ -113,13 +113,11 @@ def _view_with_builtin(paper, paper_id: int, settings, no_browser: bool):
 
     url = f"http://{settings.viewer_host}:{settings.viewer_port}/?paper_id={paper_id}"
 
-    if not no_browser:
-        _open_in_chrome(url)
-
     console.print(f"[green]Opening viewer for:[/green] {paper.title}")
     console.print(f"[blue]URL:[/blue] {url}")
 
-    run_viewer(paper_id=paper_id)
+    # run_viewer now handles opening the browser after server starts
+    run_viewer(paper_id=paper_id, open_browser=not no_browser)
 
 
 def _is_pdf_url(url: str) -> bool:
