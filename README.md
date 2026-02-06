@@ -52,12 +52,106 @@
 │    SEMANTIC SEARCH   Find papers using AI embeddings             │
 │    AUTO-TAGGING      Claude generates tags & descriptions        │
 │    INTERACTIVE UI    Arrow-key navigation in terminal            │
+│    MULTI-SELECT      Batch operations on multiple papers         │
+│    BIBTEX EXPORT     One-click citations for LaTeX               │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │ BONUS FEATURES:  Google Drive sync - BibTeX export         │  │
+│  │ BONUS FEATURES:  Google Drive sync - Scholar PDF Reader    │  │
 │  │                  arXiv/DOI metadata - Annotation search    │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Screenshots
+
+### Main Menu
+
+```
+        ╔═══════════════════════════════════════════════════════════╗
+        ║   ██████╗  █████╗ ██████╗ ███████╗██████╗                 ║
+        ║   ██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗                ║
+        ║   ██████╔╝███████║██████╔╝█████╗  ██████╔╝                ║
+        ║   ██╔═══╝ ██╔══██║██╔═══╝ ██╔══╝  ██╔══██╗                ║
+        ║   ██║     ██║  ██║██║     ███████╗██║  ██║                ║
+        ║   ╚═╝     ╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝                ║
+        ║   ███████╗████████╗ █████╗  ██████╗██╗  ██╗               ║
+        ║   ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝               ║
+        ║   ███████╗   ██║   ███████║██║     █████╔╝                ║
+        ║   ╚════██║   ██║   ██╔══██║██║     ██╔═██╗                ║
+        ║   ███████║   ██║   ██║  ██║╚██████╗██║  ██╗               ║
+        ║   ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝               ║
+        ╚═══════════════════════════════════════════════════════════╝
+
+        ▸ Browse Reading List             ·····  3 papers
+          Browse Completed Papers         ·····  5 papers
+          Add New Paper                   ·····  from URL or search
+          Search Papers                   ·····  local or external
+          Show Statistics                 ·····  library overview
+          Preferences                     ·····  configure settings
+          Interactive Shell               ·····  REPL mode
+          Quit                            ·····  exit paperstack
+
+                    ↑/↓: Navigate   Enter: Select   q: Quit
+```
+
+### Paper Browser (with Multi-Select)
+
+```
+  Reading List (2 marked)
+
+   ●   1. Attention Is All You Need [transformers, NLP]
+►●   2. BERT: Pre-training of Deep Bidirectional... [NLP, embeddings]
+     3. GPT-4 Technical Report [language models]
+     4. Constitutional AI: Harmlessness from AI... [alignment, safety]
+►    5. Retrieval-Augmented Generation for Know... [RAG, retrieval]
+
+  ↑/↓: Navigate  Space: Mark  Enter: Details  v: View  b: BibTeX  d: Done  x: Delete  q: Quit
+```
+
+### BibTeX Export
+
+```
+  BibTeX Export (3 papers)
+    ✓ Attention Is All You Need... (cached)
+    ✓ BERT: Pre-training of Deep Bidirectional... (cached)
+    Fetching: GPT-4 Technical Report...
+    ✓ GPT-4 Technical Report...
+
+  Found 3 BibTeX entries.
+  Save to file (default: citations.bib): ~/thesis/references.bib
+  Saved 3 entries to /Users/you/thesis/references.bib
+
+  Press Enter to continue...
+```
+
+### Paper Details
+
+```
+  #1 Attention Is All You Need
+
+  Authors: Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit...
+  arXiv: 1706.03762
+  Tags: transformers, NLP, attention
+  Status: done
+  URL: https://arxiv.org/abs/1706.03762
+  PDF: ~/.paperstack/papers/1706.03762.pdf
+
+  BibTeX:
+  @article{vaswani2017attention,
+    title={Attention is all you need},
+    author={Vaswani, Ashish and Shazeer, Noam...},
+    ...
+  }
+
+  Description: Introduces the Transformer architecture using self-attention...
+
+  Abstract:
+    The dominant sequence transduction models are based on complex recurrent
+    or convolutional neural networks...
+
+  Press Enter to continue...
 ```
 
 ---
@@ -66,8 +160,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/paperstack.git
-cd paperstack
+git clone https://github.com/Or-Tal/Paperstack.git
+cd Paperstack
 
 # Install with pip
 pip install -e .
@@ -98,7 +192,17 @@ export ANTHROPIC_API_KEY="your-key-here"
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 1. Add a Paper
+### 1. Launch Paperstack
+
+```bash
+# Interactive main menu
+paperstack
+
+# Or jump directly to reading list
+paperstack reading
+```
+
+### 2. Add a Paper
 
 ```bash
 # Add from arXiv
@@ -111,7 +215,7 @@ paperstack add url "https://doi.org/10.1234/example"
 paperstack add pdf <paper-id> ~/Downloads/paper.pdf
 ```
 
-### 2. Browse Your Library
+### 3. Browse Your Library
 
 ```bash
 # Interactive browser (arrow keys to navigate)
@@ -123,20 +227,36 @@ paperstack reading list
 
 **Interactive Browser Controls:**
 ```
-┌─────────────────────────────────────────┐
-│  ↑/↓ or j/k    Navigate papers          │
-│  Enter         Show paper details       │
-│  v             View PDF in browser      │
-│  d             Mark as done             │
-│  r             Move to reading list     │
-│  x             Delete paper             │
-│  q             Quit                     │
-│  PgUp/PgDn     Jump 10 papers           │
-│  Home/End      Jump to start/end        │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  NAVIGATION                                              │
+│  ↑/↓ or j/k    Navigate papers                          │
+│  PgUp/PgDn     Jump 10 papers                           │
+│  Home/End      Jump to start/end                        │
+│                                                          │
+│  SELECTION                                               │
+│  Space or m    Mark/unmark paper for batch operations   │
+│  a             Select/deselect all papers               │
+│                                                          │
+│  ACTIONS (applies to marked papers or current paper)    │
+│  Enter         Show paper details                        │
+│  v             View PDF in browser                       │
+│  b             Get BibTeX citation                       │
+│  d             Mark as done                              │
+│  r             Move to reading list                      │
+│  x             Delete paper(s)                           │
+│  q             Quit                                      │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 3. Mark Papers as Done
+### 4. Export BibTeX
+
+```bash
+# From the browser, press 'b' on a paper or select multiple with Space
+# For single paper: copies to clipboard
+# For multiple papers: saves to citations.bib
+```
+
+### 5. Mark Papers as Done
 
 ```bash
 # Interactive mode - select with arrow keys
@@ -149,7 +269,7 @@ paperstack done mark 1 --concepts "attention mechanisms" --concepts "transformer
 paperstack done
 ```
 
-### 4. Search Your Knowledge
+### 6. Search Your Knowledge
 
 ```bash
 # Semantic search over your completed papers
@@ -159,7 +279,7 @@ paperstack search local "transformer efficiency"
 paperstack search deep "multimodal learning"
 ```
 
-### 5. View Papers with Annotations
+### 7. View Papers
 
 ```bash
 # Open PDF viewer in browser
@@ -180,6 +300,7 @@ paperstack view 1
 │                                                                  │
 │  MAIN COMMANDS                                                   │
 │  -------------                                                   │
+│  paperstack             Interactive main menu                    │
 │  paperstack reading     Browse reading list (interactive)        │
 │  paperstack done        Browse completed papers (interactive)    │
 │  paperstack view        Open paper in PDF viewer                 │
@@ -243,7 +364,7 @@ Paperstack stores data in `~/.paperstack/`:
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Enable AI auto-tagging and summaries |
-| `PAPERSTACK_HOME` | Override default data directory |
+| `PAPERSTACK_HOME_DIR` | Override default data directory |
 
 ### Preferences
 
@@ -256,6 +377,9 @@ paperstack prefs set viewer_port 8080
 
 # Set storage backend (local or gdrive)
 paperstack prefs set storage_backend local
+
+# Set viewer mode (builtin or scholar)
+paperstack prefs set viewer_mode scholar
 ```
 
 ---
@@ -275,6 +399,11 @@ paperstack prefs set storage_backend local
 │                                                                  │
 │   add url     view <id>     PDF viewer     done mark             │
 │               reading       annotations    --concepts            │
+│                                                                  │
+│   ┌────────────────────────────────────────────────────────┐     │
+│   │              EXPORT FOR PAPER                          │     │
+│   │      Select papers → Press 'b' → citations.bib         │     │
+│   └────────────────────────────────────────────────────────┘     │
 │                                                                  │
 │   ┌────────────────────────────────────────────────────────┐     │
 │   │              SEARCH LATER                              │     │

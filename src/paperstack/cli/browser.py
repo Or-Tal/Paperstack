@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from pathlib import Path
+from typing import Callable, List, Optional, Set, Tuple
 
 from prompt_toolkit import Application
 from prompt_toolkit.key_binding import KeyBindings
@@ -24,42 +25,60 @@ class Action(Enum):
     READING = "reading"
     DELETE = "delete"
     SHOW = "show"
+    BIBTEX = "bibtex"
     QUIT = "quit"
 
 
 class PaperBrowser:
-    """Interactive paper browser with keyboard navigation."""
+    """Interactive paper browser with keyboard navigation and multi-select."""
 
     def __init__(
         self,
         papers: List[Paper],
         title: str = "Papers",
         show_status: bool = True,
+        current_status: Optional[str] = None,  # "reading" or "done" to hide irrelevant options
     ):
         self.papers = papers
         self.title = title
         self.show_status = show_status
+        self.current_status = current_status
         self.selected_index = 0
+        self.marked_indices: Set[int] = set()  # Multi-select
         self.action: Optional[Action] = None
         self.selected_paper: Optional[Paper] = None
+        self.selected_papers: List[Paper] = []  # For batch operations
         self.console = Console()
 
-    def _get_paper_display(self, paper: Paper, selected: bool) -> str:
-        """Format a paper for display."""
-        prefix = "► " if selected else "  "
+    def _get_paper_display(self, paper: Paper, index: int) -> Tuple[str, str]:
+        """Format a paper for display. Returns (prefix, text)."""
+        is_selected = index == self.selected_index
+        is_marked = index in self.marked_indices
+
+        # Prefix shows selection and mark status
+        if is_selected and is_marked:
+            prefix = "►● "
+        elif is_selected:
+            prefix = "►  "
+        elif is_marked:
+            prefix = " ● "
+        else:
+            prefix = "   "
+
         tags = json.loads(paper.tags) if paper.tags else []
         tags_str = f" [{', '.join(tags[:2])}]" if tags else ""
         status_str = f" ({paper.status})" if self.show_status else ""
 
         title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-        return f"{prefix}{paper.id:3d}. {title}{tags_str}{status_str}"
+        return prefix, f"{paper.id:3d}. {title}{tags_str}{status_str}"
 
     def _get_formatted_text(self) -> List[Tuple[str, str]]:
         """Get formatted text for display."""
         lines: List[Tuple[str, str]] = []
 
-        # Title
-        lines.append(("class:title", f"\n  {self.title}\n\n"))
+        # Title with marked count
+        marked_info = f" ({len(self.marked_indices)} marked)" if self.marked_indices else ""
+        lines.append(("class:title", f"\n  {self.title}{marked_info}\n\n"))
 
         if not self.papers:
             lines.append(("class:dim", "  No papers found.\n"))
@@ -68,28 +87,52 @@ class PaperBrowser:
 
         # Papers list
         for i, paper in enumerate(self.papers):
-            selected = i == self.selected_index
-            style = "class:selected" if selected else "class:paper"
-            lines.append((style, self._get_paper_display(paper, selected) + "\n"))
+            prefix, text = self._get_paper_display(paper, i)
+            is_selected = i == self.selected_index
+            is_marked = i in self.marked_indices
 
-        # Help text
+            if is_selected:
+                style = "class:selected"
+            elif is_marked:
+                style = "class:marked"
+            else:
+                style = "class:paper"
+
+            lines.append((style, prefix + text + "\n"))
+
+        # Help text - context aware
         lines.append(("class:dim", "\n"))
         lines.append(("class:help", "  ↑/↓: Navigate  "))
+        lines.append(("class:help", "Space: Mark  "))
         lines.append(("class:help", "Enter: Details  "))
-        lines.append(("class:help", "v: View PDF  "))
-        lines.append(("class:help", "d: Mark Done  "))
-        lines.append(("class:help", "r: Move to Reading  "))
+        lines.append(("class:help", "v: View  "))
+        lines.append(("class:help", "b: BibTeX  "))
+
+        # Only show relevant actions based on current view
+        if self.current_status != "done":
+            lines.append(("class:help", "d: Done  "))
+        if self.current_status != "reading":
+            lines.append(("class:help", "r: Reading  "))
+
         lines.append(("class:help", "x: Delete  "))
         lines.append(("class:help", "q: Quit\n"))
 
         return lines
 
-    def run(self) -> Tuple[Optional[Action], Optional[Paper]]:
-        """Run the interactive browser. Returns (action, paper) or (None, None)."""
+    def _get_selected_papers(self) -> List[Paper]:
+        """Get list of marked papers, or current paper if none marked."""
+        if self.marked_indices:
+            return [self.papers[i] for i in sorted(self.marked_indices)]
+        elif self.papers:
+            return [self.papers[self.selected_index]]
+        return []
+
+    def run(self) -> Tuple[Optional[Action], List[Paper]]:
+        """Run the interactive browser. Returns (action, papers_list)."""
         if not self.papers:
             self.console.print(f"\n[bold]{self.title}[/bold]\n")
             self.console.print("[yellow]No papers found.[/yellow]")
-            return None, None
+            return None, []
 
         kb = KeyBindings()
 
@@ -105,34 +148,64 @@ class PaperBrowser:
             if self.selected_index < len(self.papers) - 1:
                 self.selected_index += 1
 
+        @kb.add("space")
+        @kb.add("m")
+        def toggle_mark(event):
+            """Toggle mark on current paper."""
+            if self.selected_index in self.marked_indices:
+                self.marked_indices.remove(self.selected_index)
+            else:
+                self.marked_indices.add(self.selected_index)
+            # Move down after marking
+            if self.selected_index < len(self.papers) - 1:
+                self.selected_index += 1
+
+        @kb.add("a")
+        def select_all(event):
+            """Select/deselect all papers."""
+            if len(self.marked_indices) == len(self.papers):
+                self.marked_indices.clear()
+            else:
+                self.marked_indices = set(range(len(self.papers)))
+
         @kb.add("enter")
         def select_show(event):
             self.action = Action.SHOW
-            self.selected_paper = self.papers[self.selected_index]
+            self.selected_papers = self._get_selected_papers()
             event.app.exit()
 
         @kb.add("v")
         def select_view(event):
             self.action = Action.VIEW
-            self.selected_paper = self.papers[self.selected_index]
+            self.selected_papers = self._get_selected_papers()
+            event.app.exit()
+
+        @kb.add("b")
+        def select_bibtex(event):
+            self.action = Action.BIBTEX
+            self.selected_papers = self._get_selected_papers()
             event.app.exit()
 
         @kb.add("d")
         def select_done(event):
-            self.action = Action.DONE
-            self.selected_paper = self.papers[self.selected_index]
-            event.app.exit()
+            # Only allow if not already in done view
+            if self.current_status != "done":
+                self.action = Action.DONE
+                self.selected_papers = self._get_selected_papers()
+                event.app.exit()
 
         @kb.add("r")
         def select_reading(event):
-            self.action = Action.READING
-            self.selected_paper = self.papers[self.selected_index]
-            event.app.exit()
+            # Only allow if not already in reading view
+            if self.current_status != "reading":
+                self.action = Action.READING
+                self.selected_papers = self._get_selected_papers()
+                event.app.exit()
 
         @kb.add("x")
         def select_delete(event):
             self.action = Action.DELETE
-            self.selected_paper = self.papers[self.selected_index]
+            self.selected_papers = self._get_selected_papers()
             event.app.exit()
 
         @kb.add("q")
@@ -161,6 +234,7 @@ class PaperBrowser:
         style = Style.from_dict({
             "title": "#e94560 bold",
             "selected": "#4caf50 bold",
+            "marked": "#ffc107",
             "paper": "#eeeeee",
             "dim": "#666666",
             "help": "#888888",
@@ -183,13 +257,13 @@ class PaperBrowser:
 
         app.run()
 
-        return self.action, self.selected_paper
+        return self.action, self.selected_papers
 
 
 def browse_papers(
     status: Optional[str] = None,
     title: str = "Papers",
-) -> Tuple[Optional[Action], Optional[Paper]]:
+) -> Tuple[Optional[Action], List[Paper]]:
     """Browse papers interactively."""
     repo = Repository()
 
@@ -199,40 +273,62 @@ def browse_papers(
         papers = repo.list_papers()
 
     # Keep papers in session for the browser
-    browser = PaperBrowser(papers, title=title, show_status=(status is None))
-    action, paper = browser.run()
+    browser = PaperBrowser(
+        papers,
+        title=title,
+        show_status=(status is None),
+        current_status=status,
+    )
+    action, selected_papers = browser.run()
 
-    # Get fresh paper reference if needed for operations
-    if paper:
-        paper = repo.get_paper(paper.id)
+    # Get fresh paper references if needed for operations
+    fresh_papers = []
+    for paper in selected_papers:
+        fresh = repo.get_paper(paper.id)
+        if fresh:
+            fresh_papers.append(fresh)
 
     repo.close()
-    return action, paper
+    return action, fresh_papers
 
 
-def handle_action(action: Action, paper: Paper, console: Console) -> bool:
-    """Handle an action on a paper. Returns True to continue browsing."""
-    if action == Action.QUIT:
+def handle_action(action: Action, papers: List[Paper], console: Console, current_status: Optional[str] = None) -> bool:
+    """Handle an action on papers. Returns True to continue browsing."""
+    if action == Action.QUIT or not papers:
         return False
 
     if action == Action.SHOW:
-        show_paper_details(paper, console)
+        # Show details for first paper only
+        show_paper_details(papers[0], console)
         return True
 
     if action == Action.VIEW:
-        view_paper(paper, console)
+        # View first paper only
+        view_paper(papers[0], console)
         return False  # Exit after launching viewer
 
+    if action == Action.BIBTEX:
+        get_bibtex(papers, console)
+        return True
+
     if action == Action.DONE:
-        mark_paper_done(paper, console)
+        if current_status == "done":
+            console.print("[yellow]Papers are already marked as done.[/yellow]")
+            return True
+        for paper in papers:
+            mark_paper_done(paper, console, batch_mode=len(papers) > 1)
         return True
 
     if action == Action.READING:
-        move_to_reading(paper, console)
+        if current_status == "reading":
+            console.print("[yellow]Papers are already in reading list.[/yellow]")
+            return True
+        for paper in papers:
+            move_to_reading(paper, console)
         return True
 
     if action == Action.DELETE:
-        delete_paper(paper, console)
+        delete_papers(papers, console)
         return True
 
     return False
@@ -261,6 +357,10 @@ def show_paper_details(paper: Paper, console: Console) -> None:
 
     if paper.pdf_path:
         console.print(f"[blue]PDF:[/blue] {paper.pdf_path}")
+
+    if paper.bibtex:
+        console.print(f"\n[blue]BibTeX:[/blue]")
+        console.print(f"[dim]{paper.bibtex[:200]}...[/dim]" if len(paper.bibtex) > 200 else f"[dim]{paper.bibtex}[/dim]")
 
     if paper.description:
         console.print(f"\n[blue]Description:[/blue] {paper.description}")
@@ -373,7 +473,271 @@ def view_paper(paper: Paper, console: Console) -> None:
         run_viewer(paper_id=paper.id)
 
 
-def mark_paper_done(paper: Paper, console: Console) -> None:
+def get_bibtex(papers: List[Paper], console: Console) -> None:
+    """Get BibTeX for one or more papers."""
+    from prompt_toolkit import prompt
+
+    if not papers:
+        return
+
+    console.print(f"\n[bold]BibTeX Export[/bold] ({len(papers)} paper{'s' if len(papers) > 1 else ''})")
+
+    bibtex_entries = []
+    repo = Repository()
+
+    for paper in papers:
+        bibtex = None
+
+        # Check if paper already has bibtex
+        if paper.bibtex:
+            bibtex = paper.bibtex
+            console.print(f"  [green]✓[/green] {paper.title[:50]}... (cached)")
+        else:
+            # Try to fetch BibTeX
+            console.print(f"  [dim]Fetching:[/dim] {paper.title[:50]}...")
+            bibtex = fetch_bibtex(paper, console)
+
+            if bibtex:
+                # Cache the bibtex in the database
+                repo.update_paper(paper.id, bibtex=bibtex)
+                console.print(f"  [green]✓[/green] {paper.title[:50]}...")
+            else:
+                console.print(f"  [yellow]✗[/yellow] {paper.title[:50]}... (not found)")
+
+        if bibtex:
+            bibtex_entries.append(bibtex)
+
+    repo.close()
+
+    if not bibtex_entries:
+        console.print("\n[yellow]No BibTeX entries found.[/yellow]")
+        console.input("[dim]Press Enter to continue...[/dim]")
+        return
+
+    # Combine all entries
+    combined_bibtex = "\n\n".join(bibtex_entries)
+
+    if len(papers) == 1:
+        # Single paper - just display it
+        console.print(f"\n[bold]BibTeX:[/bold]")
+        console.print(f"[dim]{combined_bibtex}[/dim]")
+
+        # Copy to clipboard option
+        copy = prompt("\nCopy to clipboard? (y/N): ")
+        if copy.lower() == "y":
+            try:
+                import subprocess
+                import sys
+                if sys.platform == "darwin":
+                    subprocess.run(["pbcopy"], input=combined_bibtex.encode(), check=True)
+                    console.print("[green]Copied to clipboard![/green]")
+                elif sys.platform == "win32":
+                    subprocess.run(["clip"], input=combined_bibtex.encode(), check=True)
+                    console.print("[green]Copied to clipboard![/green]")
+                else:
+                    # Try xclip on Linux
+                    subprocess.run(["xclip", "-selection", "clipboard"], input=combined_bibtex.encode(), check=True)
+                    console.print("[green]Copied to clipboard![/green]")
+            except Exception as e:
+                console.print(f"[yellow]Could not copy to clipboard: {e}[/yellow]")
+    else:
+        # Multiple papers - ask for output file
+        console.print(f"\n[green]Found {len(bibtex_entries)} BibTeX entries.[/green]")
+        default_path = "citations.bib"
+        output_path = prompt(f"Save to file (default: {default_path}): ") or default_path
+
+        try:
+            output_file = Path(output_path).expanduser()
+            with open(output_file, "w") as f:
+                f.write(combined_bibtex)
+            console.print(f"[green]Saved {len(bibtex_entries)} entries to {output_file}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error saving file: {e}[/red]")
+
+    console.input("\n[dim]Press Enter to continue...[/dim]")
+
+
+def fetch_bibtex(paper: Paper, console: Console) -> Optional[str]:
+    """Fetch BibTeX for a paper from various sources."""
+    import httpx
+    import re
+    import time
+
+    # Try DOI first (most reliable)
+    if paper.doi:
+        bibtex = fetch_bibtex_from_doi(paper.doi)
+        if bibtex:
+            return validate_and_clean_bibtex(bibtex, paper)
+
+    # Try arXiv
+    if paper.arxiv_id:
+        bibtex = fetch_bibtex_from_arxiv(paper.arxiv_id, paper)
+        if bibtex:
+            return bibtex
+
+    # Try Google Scholar search
+    bibtex = fetch_bibtex_from_scholar(paper)
+    if bibtex:
+        return validate_and_clean_bibtex(bibtex, paper)
+
+    # Generate a basic BibTeX entry as fallback
+    return generate_basic_bibtex(paper)
+
+
+def fetch_bibtex_from_doi(doi: str) -> Optional[str]:
+    """Fetch BibTeX from DOI using CrossRef."""
+    import httpx
+
+    try:
+        # Use DOI content negotiation
+        headers = {"Accept": "application/x-bibtex"}
+        response = httpx.get(
+            f"https://doi.org/{doi}",
+            headers=headers,
+            follow_redirects=True,
+            timeout=10.0,
+        )
+        if response.status_code == 200:
+            return response.text
+    except Exception:
+        pass
+    return None
+
+
+def fetch_bibtex_from_arxiv(arxiv_id: str, paper: Paper) -> Optional[str]:
+    """Generate BibTeX for an arXiv paper."""
+    # arXiv doesn't provide BibTeX directly, so we generate it
+    import re
+
+    # Clean arxiv_id
+    arxiv_id = arxiv_id.replace("arXiv:", "").strip()
+
+    # Generate citation key from first author and year
+    authors = paper.authors or "Unknown"
+    first_author = authors.split(",")[0].split()[-1] if authors else "Unknown"
+
+    # Extract year from arxiv_id (format: YYMM.NNNNN or category/YYMMNNN)
+    year_match = re.search(r"(\d{2})\d{2}\.", arxiv_id)
+    if year_match:
+        year = "20" + year_match.group(1)
+    else:
+        year = "2024"
+
+    cite_key = f"{first_author.lower()}{year}arxiv"
+
+    # Format authors for BibTeX
+    author_list = authors.replace(",", " and") if authors else "Unknown"
+
+    bibtex = f"""@article{{{cite_key},
+  title={{{paper.title}}},
+  author={{{author_list}}},
+  journal={{arXiv preprint arXiv:{arxiv_id}}},
+  year={{{year}}},
+  url={{https://arxiv.org/abs/{arxiv_id}}}
+}}"""
+
+    return bibtex
+
+
+def fetch_bibtex_from_scholar(paper: Paper) -> Optional[str]:
+    """Try to fetch BibTeX from Google Scholar."""
+    # Note: Google Scholar doesn't have an official API and blocks automated requests
+    # This is a best-effort approach using Semantic Scholar instead
+    import httpx
+
+    try:
+        # Use Semantic Scholar API which is more reliable
+        query = paper.title[:100]  # Limit query length
+        response = httpx.get(
+            "https://api.semanticscholar.org/graph/v1/paper/search",
+            params={
+                "query": query,
+                "fields": "title,authors,year,venue,externalIds",
+                "limit": 1,
+            },
+            timeout=10.0,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("data"):
+                result = data["data"][0]
+
+                # Check if title matches reasonably well
+                if result.get("title", "").lower()[:30] == paper.title.lower()[:30]:
+                    # Try to get DOI from external IDs
+                    external_ids = result.get("externalIds", {})
+                    if external_ids.get("DOI"):
+                        return fetch_bibtex_from_doi(external_ids["DOI"])
+    except Exception:
+        pass
+
+    return None
+
+
+def validate_and_clean_bibtex(bibtex: str, paper: Paper) -> str:
+    """Validate and clean a BibTeX entry."""
+    import re
+
+    # Basic validation - check it has required fields
+    if not bibtex or "@" not in bibtex:
+        return generate_basic_bibtex(paper)
+
+    # Clean up common issues
+    bibtex = bibtex.strip()
+
+    # Ensure it ends with }
+    if not bibtex.rstrip().endswith("}"):
+        bibtex = bibtex.rstrip() + "\n}"
+
+    return bibtex
+
+
+def generate_basic_bibtex(paper: Paper) -> str:
+    """Generate a basic BibTeX entry from paper metadata."""
+    import re
+    from datetime import datetime
+
+    # Generate citation key
+    authors = paper.authors or "Unknown"
+    first_author = authors.split(",")[0].split()[-1] if authors else "unknown"
+    first_author = re.sub(r"[^a-zA-Z]", "", first_author).lower()
+
+    # Get year from added_at or use current year
+    year = paper.added_at.year if paper.added_at else datetime.now().year
+
+    # Create unique key
+    title_word = re.sub(r"[^a-zA-Z]", "", paper.title.split()[0]).lower() if paper.title else "paper"
+    cite_key = f"{first_author}{year}{title_word}"
+
+    # Format authors
+    author_list = authors.replace(",", " and") if authors else "Unknown"
+
+    # Determine entry type
+    entry_type = "article"
+    if paper.arxiv_id:
+        entry_type = "article"
+
+    bibtex = f"""@{entry_type}{{{cite_key},
+  title={{{paper.title}}},
+  author={{{author_list}}},
+  year={{{year}}}"""
+
+    if paper.doi:
+        bibtex += f",\n  doi={{{paper.doi}}}"
+
+    if paper.arxiv_id:
+        bibtex += f",\n  eprint={{{paper.arxiv_id}}},\n  archivePrefix={{arXiv}}"
+
+    if paper.url:
+        bibtex += f",\n  url={{{paper.url}}}"
+
+    bibtex += "\n}"
+
+    return bibtex
+
+
+def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) -> None:
     """Mark a paper as done with concepts."""
     from prompt_toolkit import prompt
 
@@ -381,30 +745,36 @@ def mark_paper_done(paper: Paper, console: Console) -> None:
         console.print(f"[yellow]Paper #{paper.id} is already marked as done.[/yellow]")
         return
 
-    console.print(f"\n[bold]Mark as Done:[/bold] {paper.title}")
-    concepts_input = prompt("Enter concepts learned (comma-separated): ")
+    if not batch_mode:
+        console.print(f"\n[bold]Mark as Done:[/bold] {paper.title}")
+        concepts_input = prompt("Enter concepts learned (comma-separated): ")
 
-    if not concepts_input.strip():
-        console.print("[yellow]No concepts provided. Cancelled.[/yellow]")
-        return
+        if not concepts_input.strip():
+            console.print("[yellow]No concepts provided. Cancelled.[/yellow]")
+            return
 
-    concepts = [c.strip() for c in concepts_input.split(",") if c.strip()]
+        concepts = [c.strip() for c in concepts_input.split(",") if c.strip()]
+    else:
+        # In batch mode, use empty concepts
+        concepts = []
+        console.print(f"  [dim]Marking done:[/dim] {paper.title[:50]}...")
 
     repo = Repository()
 
-    # Generate summary using LLM (interactive if no API key)
+    # Generate summary using LLM (skip in batch mode for speed)
     compressed_summary = None
-    try:
-        from paperstack.llm import get_llm_client
-        console.print("[dim]Generating summary...[/dim]")
-        client = get_llm_client()
-        compressed_summary = client.generate_compressed_summary(
-            title=paper.title,
-            abstract=paper.abstract,
-            user_concepts=concepts,
-        )
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not generate summary: {e}[/yellow]")
+    if not batch_mode:
+        try:
+            from paperstack.llm import get_llm_client
+            console.print("[dim]Generating summary...[/dim]")
+            client = get_llm_client()
+            compressed_summary = client.generate_compressed_summary(
+                title=paper.title,
+                abstract=paper.abstract,
+                user_concepts=concepts,
+            )
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not generate summary: {e}[/yellow]")
 
     repo.mark_done(
         paper_id=paper.id,
@@ -418,7 +788,9 @@ def mark_paper_done(paper: Paper, console: Console) -> None:
     search.index_paper(paper.id)
 
     repo.close()
-    console.print(f"[green]Marked paper #{paper.id} as done with concepts: {', '.join(concepts)}[/green]")
+
+    if not batch_mode:
+        console.print(f"[green]Marked paper #{paper.id} as done with concepts: {', '.join(concepts)}[/green]")
 
 
 def move_to_reading(paper: Paper, console: Console) -> None:
@@ -434,11 +806,19 @@ def move_to_reading(paper: Paper, console: Console) -> None:
     console.print(f"[green]Moved paper #{paper.id} back to reading list.[/green]")
 
 
-def delete_paper(paper: Paper, console: Console) -> None:
-    """Delete a paper after confirmation."""
+def delete_papers(papers: List[Paper], console: Console) -> None:
+    """Delete one or more papers after confirmation."""
     from prompt_toolkit import prompt
 
-    console.print(f"\n[bold red]Delete:[/bold red] {paper.title}")
+    if len(papers) == 1:
+        console.print(f"\n[bold red]Delete:[/bold red] {papers[0].title}")
+    else:
+        console.print(f"\n[bold red]Delete {len(papers)} papers:[/bold red]")
+        for p in papers[:5]:
+            console.print(f"  - {p.title[:50]}...")
+        if len(papers) > 5:
+            console.print(f"  ... and {len(papers) - 5} more")
+
     confirm = prompt("Are you sure? (y/N): ")
 
     if confirm.lower() != "y":
@@ -447,16 +827,19 @@ def delete_paper(paper: Paper, console: Console) -> None:
 
     repo = Repository()
 
-    # Delete PDF if exists
-    if paper.pdf_path:
-        from paperstack.storage import LocalStorage
-        storage = LocalStorage()
-        storage.delete_pdf(paper.pdf_path)
+    for paper in papers:
+        # Delete PDF if exists
+        if paper.pdf_path:
+            from paperstack.storage import LocalStorage
+            storage = LocalStorage()
+            storage.delete_pdf(paper.pdf_path)
 
-    repo.delete_paper(paper.id)
+        repo.delete_paper(paper.id)
+        console.print(f"  [dim]Deleted:[/dim] #{paper.id}")
+
     repo.close()
 
-    console.print(f"[green]Deleted paper #{paper.id}.[/green]")
+    console.print(f"[green]Deleted {len(papers)} paper{'s' if len(papers) > 1 else ''}.[/green]")
 
 
 def interactive_loop(
@@ -467,12 +850,12 @@ def interactive_loop(
     console = Console()
 
     while True:
-        action, paper = browse_papers(status=status, title=title)
+        action, papers = browse_papers(status=status, title=title)
 
         if action is None or action == Action.QUIT:
             break
 
-        if paper:
-            continue_browsing = handle_action(action, paper, console)
+        if papers:
+            continue_browsing = handle_action(action, papers, console, current_status=status)
             if not continue_browsing:
                 break
