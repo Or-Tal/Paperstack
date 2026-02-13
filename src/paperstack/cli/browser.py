@@ -736,9 +736,38 @@ def generate_basic_bibtex(paper: Paper) -> str:
     return bibtex
 
 
+def build_summary_prompt(paper: Paper, concepts: list[str]) -> str:
+    """Build the copy-paste prompt for paper summarization.
+
+    Generates a ready-to-use prompt that the user can paste into Claude Code
+    to get a compressed summary optimized for semantic search.
+    """
+    prompt_parts = [
+        "Create a compressed summary of this paper that will be useful for semantic search later.",
+        "The summary should:",
+        "1. Capture the main contributions and methods",
+        "2. Incorporate the reader's learned concepts",
+        "3. Be optimized for retrieval (include key terms)",
+        "4. Be 3-5 sentences",
+        "",
+        f"Title: {paper.title}",
+    ]
+
+    if paper.abstract:
+        prompt_parts.append(f"\nAbstract: {paper.abstract}")
+
+    if concepts:
+        prompt_parts.append(f"\nKey concepts learned by reader: {', '.join(concepts)}")
+
+    prompt_parts.append("\nReturn ONLY the summary text.")
+
+    return "\n".join(prompt_parts)
+
+
 def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) -> None:
     """Mark a paper as done with concepts."""
     from prompt_toolkit import prompt
+    from rich.panel import Panel
 
     if paper.status == PaperStatus.DONE.value:
         console.print(f"[yellow]Paper #{paper.id} is already marked as done.[/yellow]")
@@ -746,6 +775,11 @@ def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) ->
 
     if not batch_mode:
         console.print(f"\n[bold]Mark as Done:[/bold] {paper.title}")
+
+        # Show paper link
+        if paper.url:
+            console.print(f"[blue]Link:[/blue] {paper.url}")
+
         concepts_input = prompt("Please list keywords for search purposes separated by comma: ")
 
         if not concepts_input.strip():
@@ -753,27 +787,41 @@ def mark_paper_done(paper: Paper, console: Console, batch_mode: bool = False) ->
             return
 
         concepts = [c.strip() for c in concepts_input.split(",") if c.strip()]
+
+        # Build and display the copy-paste prompt for summarization
+        summary_prompt = build_summary_prompt(paper, concepts)
+        console.print()
+        console.print(Panel(
+            summary_prompt,
+            title="[bold cyan]Summary Prompt[/bold cyan]",
+            subtitle="Copy this prompt to Claude Code, then paste the summary below",
+            border_style="cyan",
+        ))
+        console.print()
+
+        # Collect pasted summary
+        console.print("[yellow]Paste the summary response (press Enter twice when done):[/yellow]")
+        lines: list[str] = []
+        empty_count = 0
+        while empty_count < 1:
+            try:
+                line = input()
+                if line == "":
+                    empty_count += 1
+                else:
+                    empty_count = 0
+                    lines.append(line)
+            except EOFError:
+                break
+
+        compressed_summary = "\n".join(lines).strip() if lines else None
     else:
         # In batch mode, use empty concepts
         concepts = []
+        compressed_summary = None
         console.print(f"  [dim]Marking done:[/dim] {paper.title[:50]}...")
 
     repo = Repository()
-
-    # Generate summary using LLM (skip in batch mode for speed)
-    compressed_summary = None
-    if not batch_mode:
-        try:
-            from paperstack.llm import get_llm_client
-            console.print("[dim]Generating summary...[/dim]")
-            client = get_llm_client()
-            compressed_summary = client.generate_compressed_summary(
-                title=paper.title,
-                abstract=paper.abstract,
-                user_concepts=concepts,
-            )
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not generate summary: {e}[/yellow]")
 
     repo.mark_done(
         paper_id=paper.id,

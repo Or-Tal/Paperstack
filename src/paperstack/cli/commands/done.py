@@ -38,7 +38,7 @@ def mark_done(
         [], "--concepts", "-c", help="Concepts learned (can be used multiple times)"
     ),
     summary: str = typer.Option(None, "--summary", "-s", help="Custom summary"),
-    no_llm: bool = typer.Option(False, "--no-llm", help="Skip LLM summary generation"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Skip summary prompt"),
 ):
     """Mark a paper as done with learned concepts."""
     if paper_id is None:
@@ -50,6 +50,9 @@ def mark_done(
             mark_paper_done(paper, console)
         return
 
+    from rich.panel import Panel
+
+    from paperstack.cli.browser import build_summary_prompt
     from paperstack.db import Repository
     from paperstack.embeddings import SemanticSearch
 
@@ -61,6 +64,10 @@ def mark_done(
         repo.close()
         raise typer.Exit(1)
 
+    # Show paper link
+    if paper.url:
+        console.print(f"[blue]Link:[/blue] {paper.url}")
+
     if paper.status == "done":
         console.print(f"[yellow]Paper #{paper_id} is already marked as done[/yellow]")
         update = typer.confirm("Update with new concepts?")
@@ -68,39 +75,36 @@ def mark_done(
             repo.close()
             raise typer.Exit(0)
 
-    # Generate compressed summary using LLM if available
     compressed_summary = summary
     key_contributions = None
 
-    # Try to use LLM unless --no-llm or custom summary provided
+    # Show copy-paste prompt unless summary provided directly or --no-llm
     if not summary and not no_llm:
-        try:
-            from paperstack.llm import get_llm_client
+        summary_prompt = build_summary_prompt(paper, concepts)
+        console.print()
+        console.print(Panel(
+            summary_prompt,
+            title="[bold cyan]Summary Prompt[/bold cyan]",
+            subtitle="Copy this prompt to Claude Code, then paste the summary below",
+            border_style="cyan",
+        ))
+        console.print()
 
-            console.print("[dim]Generating summary...[/dim]")
-            client = get_llm_client()
+        console.print("[yellow]Paste the summary response (press Enter twice when done):[/yellow]")
+        lines: list[str] = []
+        empty_count = 0
+        while empty_count < 1:
+            try:
+                line = input()
+                if line == "":
+                    empty_count += 1
+                else:
+                    empty_count = 0
+                    lines.append(line)
+            except EOFError:
+                break
 
-            # Get annotations for context
-            annotations = repo.get_annotations(paper_id)
-            ann_list = [
-                {"type": a.type, "text": a.selection_text, "content": a.content}
-                for a in annotations
-            ]
-
-            compressed_summary = client.generate_compressed_summary(
-                title=paper.title,
-                abstract=paper.abstract,
-                user_concepts=concepts,
-                annotations=ann_list,
-            )
-
-            key_contributions = client.extract_key_contributions(
-                title=paper.title,
-                abstract=paper.abstract,
-            )
-
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not generate summary: {e}[/yellow]")
+        compressed_summary = "\n".join(lines).strip() if lines else None
 
     # Mark as done
     done_entry = repo.mark_done(
@@ -147,6 +151,7 @@ def list_done(
     table.add_column("Title")
     table.add_column("Concepts", style="green")
     if verbose:
+        table.add_column("Link", style="blue")
         table.add_column("Completed")
 
     for paper in papers:
@@ -164,8 +169,12 @@ def list_done(
             paper.title[:45] + "..." if len(paper.title) > 45 else paper.title,
             concepts_str,
         ]
-        if verbose and done_entry:
-            row.append(done_entry.completed_at.strftime("%Y-%m-%d"))
+        if verbose:
+            row.append(paper.url[:40] + "..." if paper.url and len(paper.url) > 40 else (paper.url or ""))
+            if done_entry:
+                row.append(done_entry.completed_at.strftime("%Y-%m-%d"))
+            else:
+                row.append("")
 
         table.add_row(*row)
 
@@ -206,6 +215,8 @@ def show_done(
     concepts = json.loads(done_entry.user_concepts) if done_entry.user_concepts else []
 
     console.print(f"\n[bold cyan]#{paper.id}[/bold cyan] [bold]{paper.title}[/bold]")
+    if paper.url:
+        console.print(f"[blue]Link:[/blue] {paper.url}")
     console.print(f"[dim]Completed: {done_entry.completed_at.strftime('%Y-%m-%d %H:%M')}[/dim]")
     console.print()
 
