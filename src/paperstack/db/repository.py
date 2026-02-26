@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -59,6 +59,10 @@ class Repository:
         pdf_path: str | None = None,
     ) -> Paper:
         """Add a new paper."""
+        # Assign position: max existing + 1, so new papers appear at the bottom
+        max_pos = self.session.execute(
+            select(func.coalesce(func.max(Paper.position), 0))
+        ).scalar()
         paper = Paper(
             url=url,
             title=title,
@@ -71,6 +75,7 @@ class Repository:
             description=description,
             pdf_path=pdf_path,
             status=PaperStatus.READING.value,
+            position=max_pos + 1,
         )
         self.session.add(paper)
         self.session.commit()
@@ -97,7 +102,7 @@ class Repository:
 
     def list_papers(self, status: str | None = None) -> list[Paper]:
         """List papers, optionally filtered by status."""
-        stmt = select(Paper).order_by(Paper.added_at.desc())
+        stmt = select(Paper).order_by(Paper.position.asc())
         if status:
             stmt = stmt.where(Paper.status == status)
         return list(self.session.execute(stmt).scalars().all())
@@ -129,6 +134,16 @@ class Repository:
         if paper is None:
             return False
         self.session.delete(paper)
+        self.session.commit()
+        return True
+
+    def swap_paper_positions(self, paper_id_a: int, paper_id_b: int) -> bool:
+        """Swap the position values of two papers."""
+        paper_a = self.get_paper(paper_id_a)
+        paper_b = self.get_paper(paper_id_b)
+        if paper_a is None or paper_b is None:
+            return False
+        paper_a.position, paper_b.position = paper_b.position, paper_a.position
         self.session.commit()
         return True
 

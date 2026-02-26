@@ -72,6 +72,7 @@ class Paper(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime, default=func.now(), nullable=False
     )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )

@@ -38,11 +38,13 @@ class PaperBrowser:
         title: str = "Papers",
         show_status: bool = True,
         current_status: Optional[str] = None,  # "reading" or "done" to hide irrelevant options
+        repo: Optional["Repository"] = None,
     ):
         self.papers = papers
         self.title = title
         self.show_status = show_status
         self.current_status = current_status
+        self.repo = repo
         self.selected_index = 0
         self.marked_indices: Set[int] = set()  # Multi-select
         self.action: Optional[Action] = None
@@ -103,6 +105,7 @@ class PaperBrowser:
         # Help text - context aware
         lines.append(("class:dim", "\n"))
         lines.append(("class:help", "  ↑/↓: Navigate  "))
+        lines.append(("class:help", "w/s: Reorder  "))
         lines.append(("class:help", "Space: Mark  "))
         lines.append(("class:help", "Enter: Details  "))
         lines.append(("class:help", "v: View  "))
@@ -146,6 +149,48 @@ class PaperBrowser:
         @kb.add("j")
         def move_down(event):
             if self.selected_index < len(self.papers) - 1:
+                self.selected_index += 1
+
+        @kb.add("w")
+        def reorder_up(event):
+            """Swap selected paper with the one above."""
+            if self.selected_index > 0 and self.repo is not None:
+                i = self.selected_index
+                paper_a = self.papers[i]
+                paper_b = self.papers[i - 1]
+                self.repo.swap_paper_positions(paper_a.id, paper_b.id)
+                self.papers[i], self.papers[i - 1] = self.papers[i - 1], self.papers[i]
+                # Update marked indices to follow the papers
+                new_marked = set()
+                for idx in self.marked_indices:
+                    if idx == i:
+                        new_marked.add(i - 1)
+                    elif idx == i - 1:
+                        new_marked.add(i)
+                    else:
+                        new_marked.add(idx)
+                self.marked_indices = new_marked
+                self.selected_index -= 1
+
+        @kb.add("s")
+        def reorder_down(event):
+            """Swap selected paper with the one below."""
+            if self.selected_index < len(self.papers) - 1 and self.repo is not None:
+                i = self.selected_index
+                paper_a = self.papers[i]
+                paper_b = self.papers[i + 1]
+                self.repo.swap_paper_positions(paper_a.id, paper_b.id)
+                self.papers[i], self.papers[i + 1] = self.papers[i + 1], self.papers[i]
+                # Update marked indices to follow the papers
+                new_marked = set()
+                for idx in self.marked_indices:
+                    if idx == i:
+                        new_marked.add(i + 1)
+                    elif idx == i + 1:
+                        new_marked.add(i)
+                    else:
+                        new_marked.add(idx)
+                self.marked_indices = new_marked
                 self.selected_index += 1
 
         @kb.add("space")
@@ -278,6 +323,7 @@ def browse_papers(
         title=title,
         show_status=(status is None),
         current_status=status,
+        repo=repo,
     )
     action, selected_papers = browser.run()
 
